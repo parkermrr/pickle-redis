@@ -153,6 +153,10 @@ FINAL_CFLAGS=$(STD) $(WARN) $(OPT) $(DEBUG) $(CFLAGS) $(REDIS_CFLAGS)
 FINAL_LDFLAGS=$(LDFLAGS) $(OPT) $(REDIS_LDFLAGS) $(DEBUG)
 FINAL_LIBS=-lm
 
+ifeq ($(ENABLE_PICKLEDEVICE), 1)
+	FINAL_LIBS+=-lpickledevice -lstdc++
+endif
+
 # Replication compression (opt-in via BUILD_COMPRESSION=yes). When enabled the
 # replication stream can be compressed with libzstd; when disabled libzstd is
 # not required to build Redis and the compression code compiles to no-ops.
