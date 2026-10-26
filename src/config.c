@@ -3397,6 +3397,7 @@ static int applyClientMaxMemoryUsage(const char **err) {
 
 standardConfig static_configs[] = {
     /* Bool configs */
+	createBoolConfig("zset-pickle-skiplist", NULL, IMMUTABLE_CONFIG, server.zset_pickle_skiplist, 0, NULL, NULL),
     createBoolConfig("rdbchecksum", NULL, IMMUTABLE_CONFIG, server.rdb_checksum, 1, NULL, NULL),
     createBoolConfig("daemonize", NULL, IMMUTABLE_CONFIG, server.daemonize, 0, NULL, NULL),
     createBoolConfig("always-show-logo", NULL, IMMUTABLE_CONFIG, server.always_show_logo, 0, NULL, NULL),

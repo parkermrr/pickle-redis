@@ -1811,6 +1811,7 @@ typedef struct zskiplist {
     unsigned long length;
     int level;
     size_t alloc_size;
+	int pickle_skiplist;
 } zskiplist;
 
 typedef struct zset {
@@ -2577,8 +2578,10 @@ struct redisServer {
     size_t set_max_listpack_value;
     size_t zset_max_listpack_entries;
     size_t zset_max_listpack_value;
+	int zset_pickle_skiplist;
     size_t hll_sparse_max_bytes;
     size_t stream_node_max_bytes;
+	
     long long stream_node_max_entries;
     /* Stream IDMP parameters */
     long long stream_idmp_duration;     /* Default IDMP duration in seconds. */

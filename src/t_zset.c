@@ -44,9 +44,23 @@
 #include "server.h"
 #include "intset.h"  /* Compact integer set structure */
 #include <math.h>
+#ifdef ENABLE_PICKLEDEVICE
+#include <pickle_device_shim.h>
+#endif
 
 #define ZSL_OFFSET_MAX_ELE  UINT16_MAX
 #define ZSL_OFFSET_NO_ELE   UINT16_MAX
+
+#ifdef ENABLE_PICKLEDEVICE
+#define cmd_skiplist_init_level 0
+#define cmd_skiplist_init_key 1
+#define cmd_skiplist_insert 2
+#define cmd_skiplist_read 3
+#define KEY_CHUNK_SIZE_BYTES 1600
+#define LEVEL_CHUNK_SIZE_BYTES 192
+#define MAX_KEY_CHUNKS 100000
+#define MAX_LEVEL_CHUNKS 100000
+#endif
 
 const void *zslGetNodeElementForDict(const void *node);
 
@@ -62,6 +76,58 @@ dictType zsetDictType = {
     .no_value = 1,      /* no values stored (only nodes) */
     .keyFromStoredKey = zslGetNodeElementForDict,  /* extract embedded sds from node */
 };
+
+/*-----------------------------------------------------------------------------
+ * Pickle accelerated skiplist
+ *----------------------------------------------------------------------------*/
+
+#ifdef ENABLE_PICKLEDEVICE
+static volatile uint64_t* sendAddress = NULL;
+static volatile uint64_t* readAddress = NULL;
+static char* levelChunkFreeList = NULL;
+static char* keyChunkFreeList = NULL;
+static int inUse = 0;
+
+static void pickleSkiplistInit(void) {
+
+    sendAddress = pickle_device_get_uc_page();
+    readAddress = sendAddress + 1;
+    levelChunkFreeList = aligned_alloc(64, LEVEL_CHUNK_SIZE_BYTES * MAX_LEVEL_CHUNKS);
+    keyChunkFreeList = aligned_alloc(64, KEY_CHUNK_SIZE_BYTES * MAX_KEY_CHUNKS);
+    serverAssert(sendAddress && readAddress & levelChunkFreeList && keyChunkFreeList);
+
+    memset(levelChunkFreeList, 0, LEVEL_CHUNK_SIZE_BYTES * MAX_LEVEL_CHUNKS);
+    memset(keyChunkFreeList, 0, KEY_CHUNK_SIZE_BYTES * MAX_KEY_CHUNKS);
+	
+    *sendAddress = (uint64_t) levelChunkFreeList << 2 | cmd_skiplist_init_level;
+    *sendAddress = (uint64_t) keyChunkFreeList << 2 | cmd_skiplist_init_key;
+}
+
+static void pickleEncodeScore(double score, unsigned char *key) {
+    uint64_t b;
+    memcpy(&b, &score, sizeof(b));
+    b = (b >> 63) ? ~b : (b | (1ULL << 63));
+    for (int i = 0; i < 8; i++) {
+		key[i] = (unsigned char) (b >> (56 - 8 * i));
+	}
+    memset(key + 8, 0, 8);
+}
+
+static void pickleInsert(double score, zskiplistNode *node) {
+    struct { _Alignas(64) unsigned char key[16]; uint64_t data; } req;
+    pickleEncodeScore(score, req.key);
+    req.data = (uint64_t) node;
+    *sendAddress = (uint64_t) &req << 2 | cmd_skiplist_insert;
+    volatile uint64_t done = *readAddress;
+}
+
+static zskiplistNode *pickleGet(double score) {
+    struct { _Alignas(64) unsigned char key[16]; } req;
+    pickleEncodeScore(score, req.key);
+    *sendAddress = (uint64_t) &req << 2 | cmd_skiplist_read;
+    return (zskiplistNode *) (uint64_t) *readAddress;
+}
+#endif
 
 /*-----------------------------------------------------------------------------
  * Skiplist implementation of the low level API
@@ -216,6 +282,17 @@ zskiplist *zslCreate(void) {
     zsl->header = zslCreateHeaderNode(zsl);
     zsl->header->backward = NULL;
     zsl->tail = NULL;
+	if (server.zset_pickle_accel) {
+#ifdef ENABLE_PICKLEDEVICE
+    if (!inUse) {
+        inUse = 1;
+        zsl->pickle_skiplist = 1;
+        pickleZslInit();
+    }
+#else
+	serverPanic("zset-pickle-skiplist requires building with ENABLE_PICKLEDEVICE=1");
+#endif
+    }
     return zsl;
 }
 
@@ -232,6 +309,12 @@ static void zslFreeNode(zskiplist *zsl, zskiplistNode *node) {
 void zslFree(zskiplist *zsl) {
     zskiplistNode *node = zsl->header->level[0].forward, *next;
     size_t usable;
+	
+#ifdef ENABLE_PICKLEDEVICE
+    if (zsl->pickle_skiplist) {
+		inUse = 0;
+    } 
+#endif
 
     zfree_usable(zsl->header, &usable);
     zsl->alloc_size -= usable;
@@ -328,6 +411,15 @@ zskiplistNode *zslInsert(zskiplist *zsl, double score, sds ele) {
 
     serverAssert(!isnan(score));
 
+#ifdef ENABLE_PICKLEDEVICE
+    if (zsl->pickle_skiplist) {
+        zskiplistNode *node = zslCreateNode(zsl, 1, score, ele);
+        node->level[0].forward = NULL;
+        pickleInsert(score, node);
+        zsl->length++;
+        return node;
+    }
+#endif
     /* we assume the element is not already inside, since we allow duplicated
      * scores, reinserting the same element should never happen since the
      * caller of zslInsert() should test in the hash table if the element is
@@ -473,6 +565,13 @@ zskiplistNode *zslNthInRange(zskiplist *zsl, zrangespec *range, long n, unsigned
     long last_highest_level_rank = 0;
     zskiplistNode *last_highest_level_node = NULL;
     unsigned long rank_diff;
+	
+#ifdef ENABLE_PICKLEDEVICE /* Note that this only works for a ZRANGEBYSCORE command with a range of 0 i.e. the two arguments match */
+    if (zsl->pickle_skiplist) {
+        serverAssert(range->min == range->max && !range->minex && !range->maxex && n == 0 && out_rank == NULL);
+        return pickleGet(range->min);
+    }
+#endif
 
     /* If everything is out of range, return early. */
     if (!zslIsInRange(zsl,range)) return NULL;
