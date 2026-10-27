@@ -94,7 +94,7 @@ static void pickleSkiplistInit(void) {
     readAddress = sendAddress + 1;
     levelChunkFreeList = aligned_alloc(64, LEVEL_CHUNK_SIZE_BYTES * MAX_LEVEL_CHUNKS);
     keyChunkFreeList = aligned_alloc(64, KEY_CHUNK_SIZE_BYTES * MAX_KEY_CHUNKS);
-    serverAssert(sendAddress && readAddress & levelChunkFreeList && keyChunkFreeList);
+    serverAssert(sendAddress && readAddress && levelChunkFreeList && keyChunkFreeList);
 
     memset(levelChunkFreeList, 0, LEVEL_CHUNK_SIZE_BYTES * MAX_LEVEL_CHUNKS);
     memset(keyChunkFreeList, 0, KEY_CHUNK_SIZE_BYTES * MAX_KEY_CHUNKS);
@@ -282,7 +282,7 @@ zskiplist *zslCreate(void) {
     zsl->header = zslCreateHeaderNode(zsl);
     zsl->header->backward = NULL;
     zsl->tail = NULL;
-	if (server.zset_pickle_accel) {
+	if (server.zset_pickle_skiplist) {
 #ifdef ENABLE_PICKLEDEVICE
     if (!inUse) {
         inUse = 1;
