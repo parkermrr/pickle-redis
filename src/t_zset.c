@@ -287,7 +287,7 @@ zskiplist *zslCreate(void) {
     if (!inUse) {
         inUse = 1;
         zsl->pickle_skiplist = 1;
-        pickleZslInit();
+        pickleSkiplistInit();
     }
 #else
 	serverPanic("zset-pickle-skiplist requires building with ENABLE_PICKLEDEVICE=1");
