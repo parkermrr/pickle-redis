@@ -282,6 +282,7 @@ zskiplist *zslCreate(void) {
     zsl->header = zslCreateHeaderNode(zsl);
     zsl->header->backward = NULL;
     zsl->tail = NULL;
+	zsl->pickle_skiplist = 0;
 	if (server.zset_pickle_skiplist) {
 #ifdef ENABLE_PICKLEDEVICE
     if (!inUse) {
@@ -289,6 +290,9 @@ zskiplist *zslCreate(void) {
         zsl->pickle_skiplist = 1;
         pickleSkiplistInit();
     }
+	else {
+		serverPanic("pickle skiplist over-subscribed");
+	}
 #else
 	serverPanic("zset-pickle-skiplist requires building with ENABLE_PICKLEDEVICE=1");
 #endif
